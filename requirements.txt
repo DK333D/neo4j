@@ -1,6 +1,4 @@
-streamlit
 pandas
 networkx
 py2neo
 plotly
-streamlit-components
