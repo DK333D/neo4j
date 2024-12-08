@@ -3,3 +3,6 @@ networkx
 py2neo
 plotly
 neo4j
+pyvis
+pyvis
+uuid
