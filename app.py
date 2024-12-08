@@ -344,20 +344,32 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         aircraft = run_query(query_aircraft)
 
         if aircraft:
+            # Convert aircraft data to a DataFrame for easier handling
             aircraft_df = pd.DataFrame(aircraft)
-            # Add delete functionality
-            st.subheader("Delete an Aircraft")
-            aircraft_to_delete = st.selectbox("Select Aircraft to Delete", aircraft_df['Name'] if not aircraft_df.empty else [])
             
+            # Create a list of options showing both aircraft name and UUID
+            aircraft_options = [
+                f"{name} (UUID: {uuid})" for name, uuid in zip(aircraft_df['Name'], aircraft_df['UUID'])
+            ] if not aircraft_df.empty else []
+            
+            # Select aircraft to delete based on name and UUID
+            st.subheader("Delete an Aircraft")
+            aircraft_to_delete = st.selectbox("Select Aircraft to Delete", aircraft_options)
+            
+            # Extract the aircraft name and UUID from the selected option
+            if aircraft_to_delete:
+                selected_aircraft_name = aircraft_to_delete.split(" (UUID: ")[0]
+                selected_aircraft_uuid = aircraft_to_delete.split(" (UUID: ")[1].strip(")")
+
             if st.button("Delete Aircraft"):
                 if aircraft_to_delete:
+                    # Construct the query to delete by both UUID and name
                     delete_query = f"""
-                    MATCH (a:Aircraft {{name: '{aircraft_to_delete}'}})
+                    MATCH (a:Aircraft {{name: '{selected_aircraft_name}', uuid: '{selected_aircraft_uuid}'}})
                     DETACH DELETE a
                     """
                     run_query(delete_query)
-                    st.success(f"Aircraft '{aircraft_to_delete}' has been deleted.")
-                
+                    st.success(f"Aircraft with name '{selected_aircraft_name}' and UUID '{selected_aircraft_uuid}' has been deleted.")
                 else:
                     st.error("Please select an aircraft to delete.")
             
@@ -402,40 +414,50 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         """
         soldier = run_query(query_soldier)
         if soldier:
-            # Display soldiers in a table
+            # Convert soldiers to DataFrame for easier handling
             soldier_df = pd.DataFrame(soldier)
             
-            # Add a delete functionality
-            st.subheader("Delete a Soldier")
-            soldier_to_delete = st.selectbox("Select Soldier to Delete", soldier_df['Name'] if not soldier_df.empty else [])
+            # Create a list of options showing both soldier name and UUID
+            soldier_options = [
+                f"{name} (UUID: {uuid})" for name, uuid in zip(soldier_df['Name'], soldier_df['UUID'])
+            ] if not soldier_df.empty else []
             
+            # Select soldier to delete based on name and UUID
+            st.subheader("Delete a Soldier")
+            soldier_to_delete = st.selectbox("Select Soldier to Delete", soldier_options)
+            
+            # Extract the soldier name and UUID from the selected option
+            if soldier_to_delete:
+                selected_soldier_name = soldier_to_delete.split(" (UUID: ")[0]
+                selected_soldier_uuid = soldier_to_delete.split(" (UUID: ")[1].strip(")")
+
             if st.button("Delete Soldier"):
                 if soldier_to_delete:
+                    # Construct the query to delete by both UUID and name
                     delete_query = f"""
-                    MATCH (s:Soldier {{name: '{soldier_to_delete}'}})
+                    MATCH (s:Soldier {{name: '{selected_soldier_name}', uuid: '{selected_soldier_uuid}'}})
                     DETACH DELETE s
                     """
                     run_query(delete_query)
-                    st.success(f"Soldier '{soldier_to_delete}' has been deleted.")
+                    st.success(f"Soldier with name '{selected_soldier_name}' and UUID '{selected_soldier_uuid}' has been deleted.")
                 else:
                     st.error("Please select a soldier to delete.")
+
             
-            # Render the graph
-            graph = create_soldiers_network(soldier, "Soldiers")
-            graph.save_graph("soldiers.html")
-            st.components.v1.html(open("soldiers.html", "r").read(), height=500)
         else:
             st.warning("No soldiers found in the database.")
 
-        
         # Refresh the data after deletion
         st.subheader("All Soldiers in the Database")
         soldier = run_query(query_soldier)
         soldier_df = pd.DataFrame(soldier)
         st.write(soldier_df)
-
+        # Render the graph
+        graph = create_soldiers_network(soldier, "Soldiers")
+        graph.save_graph("soldiers.html")
+        st.components.v1.html(open("soldiers.html", "r").read(), height=500)
+        
         st.image("images/soldier.jpg", caption="source: https://www.defense.gov/Multimedia/Photos/igphoto/2002889537/", use_container_width=True)
-
 
     elif option == Action.DRONES.value:
         st.subheader("Add a New Drone")
@@ -472,25 +494,33 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         drones = run_query(query_drones)
         if drones:
             drones_df = pd.DataFrame(drones)
-            # Select drone to delete
-            st.subheader("Delete a Drone")
-            drone_to_delete = st.selectbox("Select Drone to Delete", drones_df['Drone'] if not drones_df.empty else [])
             
+            # Create a list of options showing both drone name and UUID
+            drone_options = [
+                f"{drone} (UUID: {uuid})" for drone, uuid in zip(drones_df['Drone'], drones_df['UUID'])
+            ] if not drones_df.empty else []
+            
+            # Select drone to delete based on UUID
+            st.subheader("Delete a Drone")
+            drone_to_delete = st.selectbox("Select Drone to Delete", drone_options)
+            
+            # Extract the drone name and UUID from the selected option
+            if drone_to_delete:
+                selected_drone_name = drone_to_delete.split(" (UUID: ")[0]
+                selected_drone_uuid = drone_to_delete.split(" (UUID: ")[1].strip(")")
+
             if st.button("Delete Drone"):
                 if drone_to_delete:
+                    # Construct the query to delete by both UUID and name
                     delete_query = f"""
-                    MATCH (d:Drone {{name: '{drone_to_delete}'}})
+                    MATCH (d:Drone {{name: '{selected_drone_name}', uuid: '{selected_drone_uuid}'}})
                     DETACH DELETE d
                     """
                     run_query(delete_query)
-                    st.success(f"Drone '{drone_to_delete}' has been deleted.")
+                    st.success(f"Drone with name '{selected_drone_name}' and UUID '{selected_drone_uuid}' has been deleted.")
                 else:
                     st.error("Please select a drone to delete.")
-            
             # Render the graph
-            graph = create_drones_network(drones, "Drones")
-            graph.save_graph("drones.html")
-            st.components.v1.html(open("drones.html", "r").read(), height=500)
         else:
             st.warning("No drones found in the database.")
         
@@ -499,7 +529,10 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         drone = run_query(query_drones)
         drones_df = pd.DataFrame(drone)
         st.write(drones_df)
-
+        graph = create_drones_network(drones, "Drones")
+        graph.save_graph("drones.html")
+        st.components.v1.html(open("drones.html", "r").read(), height=500)
+        
         st.image("images/gremlins-x-61.jpg", caption="source: https://en.wikipedia.org/wiki/Dynetics_X-61_Gremlins", use_container_width=True)
 
 
