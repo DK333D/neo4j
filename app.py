@@ -6,6 +6,7 @@ import uuid
 from enum import Enum
 import secrets
 import time
+import utils
 
 # Load the password from secrets
 APP_PASSWORD = st.secrets["App"]["PASSWORD"]
@@ -14,47 +15,23 @@ APP_PASSWORD = st.secrets["App"]["PASSWORD"]
 if "token" not in st.session_state:
     st.session_state["token"] = None
 
-# Function to generate a secure token
-def generate_token():
-    return secrets.token_hex(32)
-
-# Function to check token expiration (optional)
-def is_token_valid(token):
-    if token is None:
-        return False
-    token_parts = token.split(":")
-    if len(token_parts) != 2:
-        return False
-    try:
-        token_creation_time = int(token_parts[1])
-        current_time = int(time.time())
-        # Token valid for 1 hour (3600 seconds)
-        return current_time - token_creation_time < 3600
-    except ValueError:
-        return False
-
-# Logout function
-def logout():
-    st.session_state["token"] = None
-    st.sidebar.info("You have been logged out!")
-
 # Authentication flow
-if st.session_state["token"] is None or not is_token_valid(st.session_state["token"]):
+if st.session_state["token"] is None or not utils.is_token_valid(st.session_state["token"]):
     st.title("Login")
     password_input = st.text_input("Enter Password", type="password")
     if st.button("Login"):
         if password_input == APP_PASSWORD:
             # Generate a new token and store with timestamp
-            token = f"{generate_token()}:{int(time.time())}"
+            token = f"{utils.generate_token()}:{int(time.time())}"
             st.session_state["token"] = token
             st.success("Login successful!")
         else:
             st.error("Incorrect password.")
 
-if st.session_state["token"] is not None and is_token_valid(st.session_state["token"]):
+if st.session_state["token"] is not None and utils.is_token_valid(st.session_state["token"]):
 
 
-    st.sidebar.button("Logout", on_click=logout)
+    st.sidebar.button("Logout", on_click=utils.logout)
     # Connect to the database
     uri = st.secrets["AuraDB"]["URI"]
     username = st.secrets["AuraDB"]["USERNAME"]
@@ -67,225 +44,6 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         st.error(f"Error connecting to Neo4j: {e}")
         st.stop()
 
-
-    # Get data
-    def run_query(query):
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error executing query: {e}")
-            return []
-
-    # Add Aircraft, Drone lub Soldier with UUID
-    def add_entity_with_uuid(entity_type, name):
-        entity_uuid = str(uuid.uuid4())
-        query = f"CREATE (n:{entity_type} {{name: '{name}', uuid: '{entity_uuid}'}}) RETURN n.name AS Name, n.uuid AS UUID"
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error adding {entity_type}: {e}")
-            return []
-
-    # Add drones with brand and unique name
-    def add_drone_with_unique_name_and_brand(aircraft_name, drone_name, soldier_name, brand):
-        existing_drone_query = f"""
-        MATCH (d:Drone {{name: '{drone_name}'}})
-        RETURN d.name AS Drone
-        """
-        existing_drone = run_query(existing_drone_query)
-        
-        if existing_drone:
-            st.error(f"Drone with name '{drone_name}' already exists.")
-            return []
-
-        drone_uuid = str(uuid.uuid4())
-        query = f"""
-        CREATE (d:Drone {{name: '{drone_name}', uuid: '{drone_uuid}', brand: '{brand}'}})
-        WITH d
-        MATCH (a:Aircraft {{name: '{aircraft_name}'}})
-        MATCH (s:Soldier {{name: '{soldier_name}'}})
-        CREATE (d)-[:RESPONSIBLE_FOR]->(s)
-        CREATE (a)-[:HAS]->(d)
-        RETURN d.name AS Drone, d.uuid AS UUID, d.brand AS Brand;
-
-        """
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error adding drone: {e}")
-            return []
-
-    # Add relationship
-    def add_relationship(aircraft, drone, relationship_type):
-        query = f"""
-        MATCH (a:Aircraft {{name: '{aircraft}'}}), (d:Drone {{name: '{drone}'}})
-        CREATE (a)-[:{relationship_type}]->(d)
-        RETURN a.name AS Aircraft, d.name AS Drone, '{relationship_type}' AS Relationship
-        """
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error adding relationship: {e}")
-            return []
-
-    # Create Aircrafts and Drones Network
-    def create_aircraft_drone_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        for row in data:
-            net.add_node(row["Aircraft"], label=row["Aircraft"], color="blue")
-            net.add_node(row["Drone"], label=row["Drone"], color="green")
-            net.add_edge(row["Aircraft"], row["Drone"], title=row.get("Relationship", "CONNECTED_TO"))
-
-        net.repulsion(node_distance=120, central_gravity=0.33, spring_length=110, spring_strength=0.10, damping=0.95)
-        return net
-
-    # Create Soldiers and Drones Network
-    def create_soldier_drone_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        for row in data:
-            net.add_node(row["Soldier"], label=row["Aircraft"], color="blue")
-            net.add_node(row["Drone"], label=row["Drone"], color="green")
-            net.add_edge(row["Soldier"], row["Drone"], title=row.get("Relationship", "CONNECTED_TO"))
-
-        net.repulsion(node_distance=120, central_gravity=0.33, spring_length=110, spring_strength=0.10, damping=0.95)
-        return net
-
-    def create_drones_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        for row in data:
-            net.add_node(str(row["Brand"])+"-"+str(row["Drone"]), label=row["Drone"], color="green")
-
-        net.repulsion(node_distance=120, central_gravity=0.33, spring_length=110, spring_strength=0.10, damping=0.95)
-        return net
-
-    def create_soldiers_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        for row in data:
-            net.add_node(str(row["Name"]), label=str(row["Name"]), color="green")
-
-        net.repulsion(node_distance=120, central_gravity=0.33, spring_length=110, spring_strength=0.10, damping=0.95)
-        return net
-
-
-    def create_aircrafts_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        for row in data:
-            net.add_node(str(row["Name"]), label=str(row["Name"]), color="green")
-
-        net.repulsion(node_distance=120, central_gravity=0.33, spring_length=110, spring_strength=0.10, damping=0.95)
-        return net
-
-
-    # Generate soldiers and drones networks
-    def create_soldier_drone_network(data, title):
-        net = Network(height="500px", width="100%", bgcolor="#222222", font_color="white")
-        net.barnes_hut()
-
-        # Adding nodes and edges for soldiers and drones
-        for row in data:
-            soldier = row["Soldier"]
-            drone = row["Drone"]
-            # Add soldier node
-            net.add_node(soldier, label=soldier, color="blue")
-            # Add drone node
-            net.add_node(drone, label=drone, color="green")
-            # Create an edge from soldier to drone
-            net.add_edge(soldier, drone, title="Responsible for", color="orange")
-
-        net.repulsion(node_distance=150, central_gravity=0.33, spring_length=100, spring_strength=0.10, damping=0.95)
-
-        return net
-
-    # Relation types
-    allowed_relationship_types = ["CONNECTED_TO", "SUPPORTS", "MONITORS"]
-
-    # Lists of Aircraft, Drones, Soldiers
-    def get_aircraft_names():
-        query = "MATCH (a:Aircraft) RETURN a.name AS Aircraft"
-        data = run_query(query)
-        return [item["Aircraft"] for item in data]
-
-    def get_drone_names():
-        query = "MATCH (d:Drone) RETURN d.name AS Drone"
-        data = run_query(query)
-        return [item["Drone"] for item in data]
-
-    def get_soldier_names():
-        query = "MATCH (s:Soldier) RETURN s.name AS Soldier"
-        data = run_query(query)
-        return [item["Soldier"] for item in data]
-
-    # Deletion function
-    def delete_entity(entity_type, uuid):
-        query = f"""
-        MATCH (n:{entity_type} {{uuid: '{uuid}'}})
-        DETACH DELETE n
-        RETURN n
-        """
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error deleting {entity_type}: {e}")
-            return []
-
-    # Assign soldier to drone function 
-    def assign_soldier_to_drone(soldier_name, drone_name):
-        query = f"""
-        MATCH (s:Soldier {{name: '{soldier_name}'}}), (d:Drone {{name: '{drone_name}'}})
-        CREATE (s)-[:RESPONSIBLE_FOR]->(d)
-        RETURN s.name AS Soldier, d.name AS Drone
-        """
-        try:
-            with driver.session() as session:
-                result = session.run(query)
-                return result.data()
-        except Exception as e:
-            st.error(f"Error assigning soldier to drone: {e}")
-            return []
-
-    # Display soldiers and drones relationships
-    def view_soldiers_and_drones():
-        query = """
-        MATCH (s:Soldier)-[:RESPONSIBLE_FOR]->(d:Drone)
-        RETURN s.name AS Soldier, d.name AS Drone, d.uuid AS DroneUUID
-        """
-        data = run_query(query)
-        return data
-
-    # Function to fetch the counts from Neo4j
-    def get_statistics():
-        with driver.session() as session:
-            # Cypher query to count the aircraft, soldiers, and drones nodes
-            aircraft_query = "MATCH (a:Aircraft) RETURN COUNT(a) AS count"
-            soldier_query = "MATCH (s:Soldier) RETURN COUNT(s) AS count"
-            drone_query = "MATCH (d:Drone) RETURN COUNT(d) AS count"
-
-            # Execute queries and get counts
-            aircraft_count = session.run(aircraft_query).single()["count"]
-            soldier_count = session.run(soldier_query).single()["count"]
-            drone_count = session.run(drone_query).single()["count"]
-
-            return aircraft_count, soldier_count, drone_count
 
 
     # User Interface in Streamlit
@@ -309,7 +67,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
     if option == Action.STATISTICS.value:
         
         # Get statistics from the database
-        aircraft_count, soldier_count, drone_count = get_statistics()
+        aircraft_count, soldier_count, drone_count = utils.get_statistics(driver)
 
         # Display an image on the front page
         st.image("images/gremlins-deployment.jpg", caption="source: https://breakingdefense.com/2021/11/a-mothership-finally-recovers-darpas-gremlins-drone-but-its-not-all-good-news/", use_container_width=True)
@@ -328,7 +86,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         if st.button("Add an Aircraft"):
             if aircraft_name:
-                result = add_entity_with_uuid("Aircraft", aircraft_name)
+                result = utils.add_entity_with_uuid(driver, "Aircraft", aircraft_name)
                 if result:
                     st.success(f"Aircraft '{aircraft_name}' added successfully.")
                 else:
@@ -341,7 +99,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         MATCH (a:Aircraft)
         RETURN a.name AS Name, a.uuid AS UUID
         """
-        aircraft = run_query(query_aircraft)
+        aircraft = utils.run_query(driver, query_aircraft)
 
         if aircraft:
             # Convert aircraft data to a DataFrame for easier handling
@@ -368,7 +126,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
                     MATCH (a:Aircraft {{name: '{selected_aircraft_name}', uuid: '{selected_aircraft_uuid}'}})
                     DETACH DELETE a
                     """
-                    run_query(delete_query)
+                    utils.run_query(driver, delete_query)
                     st.success(f"Aircraft with name '{selected_aircraft_name}' and UUID '{selected_aircraft_uuid}' has been deleted.")
                 else:
                     st.error("Please select an aircraft to delete.")
@@ -376,12 +134,12 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
             # Refresh the data after deletion
             st.subheader("All Aircrafts in the Database")
 
-            aircraft = run_query(query_aircraft)
+            aircraft = utils.run_query(driver, query_aircraft)
             aircraft_df = pd.DataFrame(aircraft)
             st.write(aircraft_df)
             
             # Render the graph
-            graph = create_aircrafts_network(aircraft, "Aircrafts")
+            graph = utils.create_aircrafts_network(aircraft, "Aircrafts")
             graph.save_graph("aircrafts.html")
             st.components.v1.html(open("aircrafts.html", "r").read(), height=500)
         else:
@@ -399,7 +157,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         
         if st.button("Add a soldier"):
             if soldier_name:
-                result = add_entity_with_uuid("Soldier", soldier_name)
+                result = utils.add_entity_with_uuid(driver, "Soldier", soldier_name)
                 if result:
                     st.success(f"Soldier '{soldier_name}' added successfully.")
                 else:
@@ -412,7 +170,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         MATCH (s:Soldier)
         RETURN s.name AS Name, s.uuid AS UUID
         """
-        soldier = run_query(query_soldier)
+        soldier = utils.run_query(driver, query_soldier)
         if soldier:
             # Convert soldiers to DataFrame for easier handling
             soldier_df = pd.DataFrame(soldier)
@@ -438,7 +196,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
                     MATCH (s:Soldier {{name: '{selected_soldier_name}', uuid: '{selected_soldier_uuid}'}})
                     DETACH DELETE s
                     """
-                    run_query(delete_query)
+                    utils.run_query(driver, delete_query)
                     st.success(f"Soldier with name '{selected_soldier_name}' and UUID '{selected_soldier_uuid}' has been deleted.")
                 else:
                     st.error("Please select a soldier to delete.")
@@ -449,11 +207,11 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         # Refresh the data after deletion
         st.subheader("All Soldiers in the Database")
-        soldier = run_query(query_soldier)
+        soldier = utils.run_query(driver, query_soldier)
         soldier_df = pd.DataFrame(soldier)
         st.write(soldier_df)
         # Render the graph
-        graph = create_soldiers_network(soldier, "Soldiers")
+        graph = utils.create_soldiers_network(soldier, "Soldiers")
         graph.save_graph("soldiers.html")
         st.components.v1.html(open("soldiers.html", "r").read(), height=500)
         
@@ -462,8 +220,8 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
     elif option == Action.DRONES.value:
         st.subheader("Add a New Drone")
 
-        aircraft_names = get_aircraft_names()
-        soldier_names = get_soldier_names()
+        aircraft_names = utils.get_aircraft_names(driver)
+        soldier_names = utils.get_soldier_names(driver)
 
         if not aircraft_names:
             st.error("No Aircraft found in the database. Add Aircraft first.")
@@ -478,7 +236,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         if st.button("Add a drone"):
             if drone_name and soldier_name and brand:
-                result = add_drone_with_unique_name_and_brand(aircraft_name, drone_name, soldier_name, brand)
+                result = utils.add_drone_with_unique_name_and_brand(driver, aircraft_name, drone_name, soldier_name, brand)
                 if result:
                     st.success(f"Drone '{drone_name}' of brand '{brand}' added and assigned to Soldier '{soldier_name}'.")
                 else:
@@ -491,7 +249,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         MATCH (d:Drone)
         RETURN d.name AS Drone, d.uuid AS UUID, d.brand AS Brand
         """
-        drones = run_query(query_drones)
+        drones = utils.run_query(driver, query_drones)
         if drones:
             drones_df = pd.DataFrame(drones)
             
@@ -516,7 +274,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
                     MATCH (d:Drone {{name: '{selected_drone_name}', uuid: '{selected_drone_uuid}'}})
                     DETACH DELETE d
                     """
-                    run_query(delete_query)
+                    utils.run_query(driver, delete_query)
                     st.success(f"Drone with name '{selected_drone_name}' and UUID '{selected_drone_uuid}' has been deleted.")
                 else:
                     st.error("Please select a drone to delete.")
@@ -526,10 +284,10 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         
         # Refresh the data after deletion
         st.subheader("All Drones in the Database")
-        drone = run_query(query_drones)
+        drone = utils.run_query(driver, query_drones)
         drones_df = pd.DataFrame(drone)
         st.write(drones_df)
-        graph = create_drones_network(drones, "Drones")
+        graph = utils.create_drones_network(drones, "Drones")
         graph.save_graph("drones.html")
         st.components.v1.html(open("drones.html", "r").read(), height=500)
         
@@ -541,8 +299,8 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         st.subheader("Relationships")
 
         # Dropdown for existing aircraft and drone names
-        aircraft_names = get_aircraft_names()
-        drone_names = get_drone_names()
+        aircraft_names = utils.get_aircraft_names(driver)
+        drone_names = utils.get_drone_names(driver)
 
         if not aircraft_names:
             st.error("No Aircraft found in the database. Add Aircraft first.")
@@ -551,11 +309,11 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         selected_aircraft = st.selectbox("Select Aircraft", aircraft_names, index=0 if aircraft_names else -1)
         selected_drone = st.selectbox("Select Drone", drone_names, index=0 if drone_names else -1)
-        relationship_type = st.selectbox("Select Relationship Type", allowed_relationship_types)
+        relationship_type = st.selectbox("Select Relationship Type", utils.allowed_relationship_types)
 
         if st.button("Add a relationship"):
             if selected_aircraft and selected_drone and relationship_type:
-                result = add_relationship(selected_aircraft, selected_drone, relationship_type)
+                result = utils.add_relationship(driver, selected_aircraft, selected_drone, relationship_type)
                 if result:
                     st.success(f"Relationship {relationship_type} added between {selected_aircraft} and {selected_drone}.")
                 else:
@@ -568,13 +326,13 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         MATCH (a:Aircraft)-[r]->(d:Drone)
         RETURN a.name AS Aircraft, d.name AS Drone, type(r) AS Relationship
         """
-        relationships = run_query(query_aircraft_drones)
+        relationships = utils.run_query(driver, query_aircraft_drones)
 
         if relationships:
             st.subheader("Relationships between Aircraft and Drones")
             st.write(pd.DataFrame(relationships))
 
-            graph = create_aircraft_drone_network(relationships, "Aircraft-Drone Relationships")
+            graph = utils.create_aircraft_drone_network(relationships, "Aircraft-Drone Relationships")
             graph.save_graph("graph.html")
             st.components.v1.html(open("graph.html", "r").read(), height=500)
         else:
@@ -583,12 +341,12 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
     elif option == Action.SOLDIERS_AND_DRONES_RELATIONSHIPS.value:
         st.subheader("Assign Soldier to Drone")
 
-        drone_names = get_drone_names()
+        drone_names = utils.get_drone_names(driver)
 
         if not drone_names:
             st.error("No Drones found in the database. Add Drones first.")
 
-        soldier_names = get_soldier_names()
+        soldier_names = utils.get_soldier_names(driver)
         if not soldier_names:
             st.error("No Soldiers found in the database. Add Soldiers first.")
 
@@ -597,7 +355,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         if st.button("Assign Soldier to Drone"):
             if soldier_name and drone_name:
-                result = assign_soldier_to_drone(soldier_name, drone_name)
+                result = utils.assign_soldier_to_drone(driver, soldier_name, drone_name)
                 if result:
                     st.success(f"Soldier '{soldier_name}' has been assigned to Drone '{drone_name}'.")
                 else:
@@ -611,13 +369,13 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
         MATCH (a:Soldier)-[r]->(d:Drone)
         RETURN a.name AS Soldier, d.name AS Drone, type(r) AS Relationship
         """
-        relationships = run_query(query_soldiers_drones)
+        relationships = utils.run_query(driver, query_soldiers_drones)
 
         if relationships:
             st.subheader("Relationships between Soldier and Drones")
             st.write(pd.DataFrame(relationships))
 
-            graph = create_soldier_drone_network(relationships, "Soldier-Drone Relationships")
+            graph = utils.create_soldier_drone_network(relationships, "Soldier-Drone Relationships")
             graph.save_graph("graph.html")
             st.components.v1.html(open("graph.html", "r").read(), height=500)
         else:
@@ -631,7 +389,7 @@ if st.session_state["token"] is not None and is_token_valid(st.session_state["to
 
         if st.button("Delete Entity"):
             if entity_uuid:
-                result = delete_entity(entity_type, entity_uuid)
+                result = utils.delete_entity(driver, entity_type, entity_uuid)
                 if result:
                     st.success(f"{entity_type} with UUID {entity_uuid} deleted successfully.")
                 else:
